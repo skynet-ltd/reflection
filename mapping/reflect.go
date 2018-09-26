@@ -7,6 +7,25 @@ import (
 	"regexp"
 )
 
+const (
+	// DepthToken ...
+	DepthToken = "."
+	// TypeEntryToken ...
+	TypeEntryToken = "<"
+	// TypeCloseToken ...
+	TypeCloseToken = ">"
+	// SliceEntryToken ...
+	SliceEntryToken = "["
+	// SliceCloseToken ...
+	SliceCloseToken = "]"
+	// TagsBeginToken ...
+	TagsBeginToken = "`"
+	// TagsEndToken ...
+	TagsEndToken = "`"
+	// TagsDelimiter ...
+	TagsDelimiter = ";"
+)
+
 // ReflectorFunc ...
 type ReflectorFunc func(string, interface{}, *map[string]interface{}, *map[uintptr]struct{}) error
 
@@ -78,7 +97,7 @@ func getReflection(path string, v interface{}, res *map[string]interface{}, pts 
 		}
 	case reflect.Chan:
 	default:
-		(*res)[toPath(path, "", rValue.Type().String())] = rValue.Interface()
+		(*res)[toPath(path, "", rValue.Type().String(), "")] = rValue.Interface()
 	}
 	return nil
 }
@@ -91,29 +110,33 @@ func reflectStruct(path string, v interface{}, res *map[string]interface{}, pts 
 		fieldVal := rValue.Field(i)
 		kind := dstTypeField.Type.Kind()
 		tp := nonAlphaNum.ReplaceAllString(dstTypeField.Type.String(), "")
+		tags := fmt.Sprintf("%s%s%s", TagsBeginToken, dstTypeField.Tag, TagsEndToken)
 		switch kind {
 		case reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint8,
 			reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 			reflect.Bool, reflect.Float32, reflect.Float64, reflect.Invalid,
-			reflect.Complex64, reflect.Complex128, reflect.Func, reflect.String:
-			(*res)[toPath(path, dstTypeField.Name, kind.String())] = fieldVal.Interface()
+			reflect.Complex64, reflect.Complex128, reflect.String:
+			//fmt.Println("Simple:", dstTypeField.Tag)
+			(*res)[toPath(path, dstTypeField.Name, kind.String(), tags)] = fieldVal.Interface()
+		case reflect.Func: //skip
 		case reflect.Ptr:
 			if fieldVal.Elem().Kind() == reflect.Invalid {
-				(*res)[toPath(path, dstTypeField.Name, tp)] = fieldVal.Interface()
+				//fmt.Println("Invalid:", dstTypeField.Tag)
+				(*res)[toPath(path, dstTypeField.Name, tp, tags)] = fieldVal.Interface()
 				break
 			}
 			if _, ok := (*pts)[fieldVal.Elem().Addr().Pointer()]; ok {
 				return errors.New("found recursive pointer")
 			}
-			if err := getReflection(toPath(path, dstTypeField.Name, ""), fieldVal.Interface(), res, pts); err != nil {
+			if err := getReflection(toPath(path, dstTypeField.Name, "", tags), fieldVal.Interface(), res, pts); err != nil {
 				return err
 			}
 		case reflect.Slice:
-			if err := reflectSlice(toPath(path, dstTypeField.Name, ""), fieldVal.Interface(), res, pts, getReflection); err != nil {
+			if err := reflectSlice(toPath(path, dstTypeField.Name, "", tags), fieldVal.Interface(), res, pts, getReflection); err != nil {
 				return err
 			}
 		case reflect.Map:
-			if err := reflectMap(toPath(path, dstTypeField.Name, ""), fieldVal.Interface(), res, pts, getReflection); err != nil {
+			if err := reflectMap(toPath(path, dstTypeField.Name, "", tags), fieldVal.Interface(), res, pts, getReflection); err != nil {
 				return err
 			}
 		}
@@ -128,34 +151,34 @@ func reflectMap(path string, v interface{}, res *map[string]interface{}, pts *ma
 		k := keys[i]
 		keyType := k.Type().String()
 		val := rMapVal.MapIndex(k)
-		fieldName := path + fmt.Sprintf("[%v<%s>]", k.Interface(), keyType)
+		fieldName := path + fmt.Sprintf("[%v%s%s%s]", k.Interface(), TypeEntryToken, keyType, TypeCloseToken)
 		switch val.Type().Kind() {
 		case reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint8,
 			reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 			reflect.Bool, reflect.Float32, reflect.Float64, reflect.Invalid,
 			reflect.Complex64, reflect.Complex128, reflect.String:
-			(*res)[toPath("", fieldName, val.Type().Kind().String())] = val.Interface()
+			(*res)[toPath("", fieldName, val.Type().Kind().String(), "")] = val.Interface()
 		case reflect.Ptr:
 			if val.Elem().Kind() == reflect.Invalid {
-				(*res)[toPath("", fieldName, val.Type().Kind().String())] = val.Interface()
+				(*res)[toPath("", fieldName, val.Type().Kind().String(), "")] = val.Interface()
 				break
 			}
 			if _, ok := (*pts)[val.Elem().Addr().Pointer()]; ok {
 				return errors.New("found recursive pointer")
 			}
-			if err := rf(toPath("", fieldName, ""), val.Interface(), res, pts); err != nil {
+			if err := rf(toPath("", fieldName, "", ""), val.Interface(), res, pts); err != nil {
 				return err
 			}
 		case reflect.Interface:
-			if err := rf(toPath("", fieldName, ""), val.Interface(), res, pts); err != nil {
+			if err := rf(toPath("", fieldName, "", ""), val.Interface(), res, pts); err != nil {
 				return err
 			}
 		case reflect.Slice:
-			if err := reflectSlice(toPath("", fieldName, ""), val.Interface(), res, pts, rf); err != nil {
+			if err := reflectSlice(toPath("", fieldName, "", ""), val.Interface(), res, pts, rf); err != nil {
 				return err
 			}
 		case reflect.Map:
-			if err := reflectMap(toPath("", fieldName, ""), val.Interface(), res, pts, rf); err != nil {
+			if err := reflectMap(toPath("", fieldName, "", ""), val.Interface(), res, pts, rf); err != nil {
 				return err
 			}
 		}
@@ -167,7 +190,7 @@ func reflectSlice(path string, v interface{}, res *map[string]interface{}, pts *
 	fieldVal := refUnwrap(v)
 	for i := 0; i < fieldVal.Len(); i++ {
 		val := fieldVal.Index(i)
-		fieldName := path + fmt.Sprintf("[%d]", i)
+		fieldName := path + fmt.Sprintf("%s%d%s", SliceEntryToken, i, SliceCloseToken)
 		tp := nonAlphaNum.ReplaceAllString(fieldVal.Type().String(), "")
 		switch val.Type().Kind() {
 		case reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint8,
@@ -175,29 +198,29 @@ func reflectSlice(path string, v interface{}, res *map[string]interface{}, pts *
 			reflect.Bool, reflect.Float32, reflect.Float64, reflect.Invalid,
 			reflect.Complex64, reflect.Complex128, reflect.Func, reflect.String:
 
-			(*res)[toPath("", fieldName, tp)] = fieldVal.Index(i).Interface()
+			(*res)[toPath("", fieldName, tp, "")] = fieldVal.Index(i).Interface()
 		case reflect.Ptr:
 			if val.Elem().Kind() == reflect.Invalid {
-				(*res)[toPath("", fieldName, tp)] = val.Interface()
+				(*res)[toPath("", fieldName, tp, "")] = val.Interface()
 				break
 			}
 			if _, ok := (*pts)[val.Elem().Addr().Pointer()]; ok {
 				return errors.New("found recursive pointer")
 			}
-			if err := getReflection(toPath("", fieldName, ""), val.Interface(), res, pts); err != nil {
+			if err := getReflection(toPath("", fieldName, "", ""), val.Interface(), res, pts); err != nil {
 				return err
 			}
 
 		case reflect.Interface:
-			if err := getReflection(toPath("", fieldName, ""), val.Interface(), res, pts); err != nil {
+			if err := getReflection(toPath("", fieldName, "", ""), val.Interface(), res, pts); err != nil {
 				return err
 			}
 		case reflect.Slice:
-			if err := reflectSlice(toPath("", fieldName, ""), val.Interface(), res, pts, rf); err != nil {
+			if err := reflectSlice(toPath("", fieldName, "", ""), val.Interface(), res, pts, rf); err != nil {
 				return err
 			}
 		case reflect.Map:
-			if err := reflectMap(toPath("", fieldName, ""), val.Interface(), res, pts, rf); err != nil {
+			if err := reflectMap(toPath("", fieldName, "", ""), val.Interface(), res, pts, rf); err != nil {
 				return err
 			}
 		}
@@ -205,24 +228,19 @@ func reflectSlice(path string, v interface{}, res *map[string]interface{}, pts *
 	return nil
 }
 
-func toPath(p, name, vType string) string {
-	if p == "" {
-		if vType == "" {
-			return name
-		}
-		if name == "" {
-			return "<" + vType + ">"
-		}
-		return name + "<" + vType + ">"
+func toPath(p, name, vType, tag string) string {
+	var res string
+	if p != "" {
+		res += p
 	}
-	if name == "" {
-		if vType == "" {
-			return p
+	if name != "" {
+		if p != "" {
+			res += DepthToken
 		}
-		return p + "<" + vType + ">"
+		res += name + tag
 	}
-	if vType == "" {
-		return p + "." + name
+	if vType != "" {
+		res += TypeEntryToken + vType + TypeCloseToken
 	}
-	return p + "." + name + "<" + vType + ">"
+	return res
 }

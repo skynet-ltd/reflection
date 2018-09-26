@@ -18,13 +18,13 @@ var _ = Describe("test diff for HWare model", func() {
 
 	Specify("test Reflection func", func() {
 		type Node struct {
-			Name     string
+			Name     string `tag:"test" diff:"+"`
 			Value    uint16
 			Siblings []*Node
 			Parent   *Node
 			Left     *Node
 			Right    *Node
-			Map      map[uint16]map[string]interface{}
+			Map      map[uint16]map[string]interface{} `tag:"test" diff:"+"`
 			//Map  map[uint16]interface{}
 			Data []byte
 		}
