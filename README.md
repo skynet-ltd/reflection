@@ -1,6 +1,14 @@
 # Reflection.
 
-## This function iterate over your struct and map all values to resulting map
+## This function iterates over your struct and map all values to resulting map
+
+### Usage
+
+`go get github.com/skynet-ltd/reflection/mapping`
+
+`package main`
+
+`import ("github.com/skynet-ltd/reflection/mapping")`
 
 Output example
 
